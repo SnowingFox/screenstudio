@@ -11,7 +11,8 @@
   const TAB_WIDTH = 22;
   const REFRESH_MS = 1000;
   // Windows smaller than this (toolbars, widgets) only get the panel through
-  // the Developer menu.
+  // the Developer menu, as do windows other than the focused one (main.js
+  // decides through setTabAllowed).
   const MIN_TAB_WINDOW = { width: 420, height: 300 };
 
   const DEBUG_FLAGS = [
@@ -96,9 +97,11 @@
   doc.addEventListener('pointerup', () => setTimeout(() => (pointerDown = false)), true);
 
   let open = false;
+  let tabAllowed = false;
   function layout() {
-    const fitsTab = window.innerWidth >= MIN_TAB_WINDOW.width && window.innerHeight >= MIN_TAB_WINDOW.height;
-    frame.style.display = open || fitsTab ? 'block' : 'none';
+    const showTab =
+      tabAllowed && window.innerWidth >= MIN_TAB_WINDOW.width && window.innerHeight >= MIN_TAB_WINDOW.height;
+    frame.style.display = open || showTab ? 'block' : 'none';
     if (open) {
       Object.assign(frame.style, {
         top: '0',
@@ -242,6 +245,43 @@
               : row(key, value, { field: true }),
           ),
           note('Decoded from the auth token the app keeps locally. Read-only.'),
+        );
+      },
+    }),
+
+    section('Permissions', {
+      build: (body, badge) => (data) => {
+        const p = data.permissions;
+        const missing = ['screen', 'accessibility'].filter((key) => p[key] !== 'granted');
+        badge.replaceChildren(missing.length ? `${missing.length} missing` : h('span', {}, h('span', { class: 'dot' }, '●'), 'Granted'));
+        const statusRow = (label, value) =>
+          h('div', { class: 'row' }, h('span', { class: 'label' }, label), h('span', { class: `value${value === 'granted' ? '' : ' error'}` }, value));
+        const settingsButton = (label, pane) =>
+          h('button', { class: 'btn', onclick: (event) => act(event.currentTarget, 'openPrivacySettings', { pane }) }, label);
+        body.replaceChildren(
+          statusRow('Screen', p.screen),
+          statusRow('Accessibility', p.accessibility),
+          statusRow('Microphone', p.microphone),
+          statusRow('Camera', p.camera),
+          p.accessibility === 'granted'
+            ? null
+            : h(
+                'button',
+                {
+                  class: 'btn',
+                  onclick: (event) => act(event.currentTarget, 'requestAccessibility', undefined, 'Check System Settings'),
+                },
+                'Add to Accessibility list',
+              ),
+          p.accessibility === 'granted' ? null : settingsButton('Open Accessibility settings', 'Privacy_Accessibility'),
+          p.screen === 'granted' ? null : settingsButton('Open Screen Recording settings', 'Privacy_ScreenCapture'),
+          p.translocated
+            ? note(
+                'Running from a translocated copy of a quarantined app (e.g. straight from the DMG). Install it to /Applications so permission grants stick.',
+                'error',
+              )
+            : null,
+          note('The app\'s own "Allow Accessibility access" only opens System Settings; it never adds itself to the list.'),
         );
       },
     }),
@@ -551,6 +591,10 @@
     toggle() {
       setOpen(!open);
     },
+    setTabAllowed(value) {
+      tabAllowed = value;
+      layout();
+    },
   };
 
   function css() {
@@ -577,7 +621,7 @@
         position: fixed; top: 10px; bottom: 10px; right: ${TAB_WIDTH + 8}px; width: ${PANEL_WIDTH}px;
         max-width: calc(100vw - ${TAB_WIDTH + 18}px);
         display: flex; flex-direction: column; overflow: hidden;
-        background: rgba(28, 28, 30, .97); border: 1px solid rgba(255, 255, 255, .09); border-radius: 12px;
+        background: #1c1c1e; border: 1px solid rgba(255, 255, 255, .09); border-radius: 12px;
         box-shadow: 0 16px 48px rgba(0, 0, 0, .5);
       }
       .panel[hidden] { display: none; }

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Starts Screen Studio with the Node inspector and Chromium remote debugging
-// enabled, injects a Developer menu (inject.js) and the DEV panel (panel/) into
-// its main process and opens a standalone DevTools window on that process
-// (window.mjs). The app bundle itself is never modified.
+// enabled and injects a Developer menu (inject.js) and the DEV panel (panel/)
+// into its main process. With --main-devtools it also opens a standalone
+// DevTools window on that process (window.mjs). The app bundle itself is never
+// modified.
 import electronPath from 'electron';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -20,6 +21,7 @@ const { values: opts } = parseArgs({
     app: { type: 'string', default: '/Applications/Screen Studio.app' },
     'inspect-port': { type: 'string', default: '9229' },
     'remote-debugging-port': { type: 'string', default: '9222' },
+    'main-devtools': { type: 'boolean', default: false },
   },
 });
 const inspectPort = Number(opts['inspect-port']);
@@ -74,6 +76,16 @@ async function waitForInspector(child, port) {
 
 function readSource(path) {
   return readFileSync(new URL(path, import.meta.url), 'utf8');
+}
+
+// The inspector comes up before Electron has registered its `electron` module.
+async function waitForElectron(webSocketUrl) {
+  const probe = "(() => { try { (process.mainModule?.require ?? require)('electron'); return true } catch { return false } })()";
+  for (let attempt = 0; attempt < 200; attempt++) {
+    if (await evaluate(webSocketUrl, probe).catch(() => false)) return;
+    await sleep(25);
+  }
+  fail('Timed out waiting for Electron to initialize in the main process.');
 }
 
 async function evaluate(webSocketUrl, expression) {
@@ -134,7 +146,7 @@ async function startScreenStudio() {
   screenStudio.once('exit', (code, signal) => {
     appPid = undefined;
     if (restarting) return;
-    devtoolsWindow.kill();
+    devtoolsWindow?.kill();
     appLog.kill();
     process.exit(code ?? (signal ? 1 : 0));
   });
@@ -142,6 +154,7 @@ async function startScreenStudio() {
   inspectorTarget = await waitForInspector(screenStudio, inspectPort);
   const { webSocketDebuggerUrl } = inspectorTarget;
   appPid = await evaluate(webSocketDebuggerUrl, 'process.pid').catch(() => undefined);
+  await waitForElectron(webSocketDebuggerUrl);
   try {
     log(await evaluate(webSocketDebuggerUrl, readSource('./inject.js')));
   } catch (error) {
@@ -181,14 +194,17 @@ function killApp(signal) {
 if (!existsSync(binary)) fail(`Screen Studio not found at "${opts.app}". Pass --app <path to Screen Studio.app>.`);
 if (isAppRunning()) fail('Screen Studio is already running. Quit it first, it only allows a single instance.');
 
-const devtoolsWindow = spawn(electronPath, [fileURLToPath(new URL('./window.mjs', import.meta.url))], {
-  stdio: ['ignore', 'pipe', 'inherit'],
-  env: { ...process.env, SCREEN_STUDIO_INSPECT_PORT: String(inspectPort) },
-});
-readline.createInterface({ input: devtoolsWindow.stdout }).on('line', (line) => {
-  if (line === 'RESTART') restartScreenStudio();
-});
-devtoolsWindow.on('exit', () => log('DevTools window closed, Screen Studio keeps running.'));
+let devtoolsWindow;
+if (opts['main-devtools']) {
+  devtoolsWindow = spawn(electronPath, [fileURLToPath(new URL('./window.mjs', import.meta.url))], {
+    stdio: ['ignore', 'pipe', 'inherit'],
+    env: { ...process.env, SCREEN_STUDIO_INSPECT_PORT: String(inspectPort) },
+  });
+  readline.createInterface({ input: devtoolsWindow.stdout }).on('line', (line) => {
+    if (line === 'RESTART') restartScreenStudio();
+  });
+  devtoolsWindow.on('exit', () => log('DevTools window closed, Screen Studio keeps running.'));
+}
 
 // The app's output goes to a file through `open`; follow it here.
 writeFileSync(logFile, '');
@@ -196,14 +212,18 @@ const appLog = spawn('tail', ['-n', '+1', '-F', logFile], { stdio: ['ignore', 'i
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
-    devtoolsWindow.kill(signal);
+    devtoolsWindow?.kill(signal);
     killApp(signal);
   });
 }
 
 await startScreenStudio();
-log('Main process:  DevTools window (Cmd+R there restarts Screen Studio)');
+log('DEV panel:     DEV tab on the right edge of the focused window, or Cmd+Option+P');
 log('Renderer:      Developer menu or Cmd+Option+I inside Screen Studio');
-log('DEV panel:     DEV tab on the right edge of app windows, or Cmd+Option+P');
+log(
+  opts['main-devtools']
+    ? 'Main process:  DevTools window (Cmd+R there restarts Screen Studio)'
+    : 'Main process:  chrome://inspect, or relaunch with --main-devtools for a DevTools window',
+);
 log(`App output:    ${logFile}`);
 log(`All targets:   chrome://inspect (localhost:${remotePort} windows, localhost:${inspectPort} main process)`);

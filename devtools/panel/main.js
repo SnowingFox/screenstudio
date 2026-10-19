@@ -10,7 +10,7 @@
 // is sent through (and logged by) the renderer.
 ((rendererSource) => {
   const load = process.mainModule?.require ?? require;
-  const { app, BrowserWindow, clipboard, shell, webContents } = load('electron');
+  const { app, BrowserWindow, clipboard, shell, systemPreferences, webContents } = load('electron');
   const inspector = load('node:inspector');
 
   if (globalThis.__ssDevtoolsPanel) return 'DEV panel already installed';
@@ -313,6 +313,18 @@
     };
   }
 
+  function permissions() {
+    return {
+      screen: systemPreferences.getMediaAccessStatus('screen'),
+      accessibility: systemPreferences.isTrustedAccessibilityClient(false) ? 'granted' : 'not granted',
+      microphone: systemPreferences.getMediaAccessStatus('microphone'),
+      camera: systemPreferences.getMediaAccessStatus('camera'),
+      // Gatekeeper runs quarantined apps that were not moved by Finder from a
+      // random read-only copy.
+      translocated: process.execPath.includes('/AppTranslocation/'),
+    };
+  }
+
   async function snapshot(win) {
     const [preferences, signedIn, payload] = await Promise.all([
       settled(trpc(win, 'preferences.get')),
@@ -329,6 +341,7 @@
         payload: toPlain(payload.value ?? null),
         error: signedIn.error ?? payload.error ?? null,
       },
+      permissions: permissions(),
       preferences: toPlain(preferences.value ?? null),
       preferencesError: preferences.error ?? null,
       requests: state.requests.slice(-100),
@@ -353,6 +366,12 @@
       if (type !== 'query' && type !== 'mutation') throw new Error('Only queries and mutations can be called from here');
       return preview(await trpc(win, path, type, input), 20_000);
     },
+    // Screen Studio's own "Allow Accessibility access" checks with
+    // kAXTrustedCheckOptionPrompt off, which never adds the app to the list in
+    // System Settings. Asking with the prompt on does.
+    requestAccessibility: () => systemPreferences.isTrustedAccessibilityClient(true),
+    openPrivacySettings: (win, { pane }) =>
+      shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${pane}`),
     clearRequests: () => {
       state.requests.length = 0;
     },
@@ -404,6 +423,20 @@
     }
   }
 
+  // Only the focused app window gets the DEV tab: some windows stay shown
+  // while transparent and empty, where a lone tab would float over the desktop.
+  let tabWindow = null;
+  function moveTabTo(win) {
+    tabWindow = win;
+    for (const other of BrowserWindow.getAllWindows()) {
+      if (other.isDestroyed() || !state.injected.has(other.webContents)) continue;
+      other.webContents.executeJavaScript(`window.__ssDevtoolsPanel?.setTabAllowed(${other === win})`).catch(() => {});
+    }
+  }
+  app.on('browser-window-focus', (_event, win) => {
+    if (state.injected.has(win.webContents)) moveTabTo(win);
+  });
+
   async function inject(win) {
     if (win.isDestroyed() || state.injected.has(win.webContents)) return;
     state.injected.add(win.webContents);
@@ -414,6 +447,7 @@
       console.error(`[devtools] Could not inject the DEV panel into window #${win.id}:`, error);
       return;
     }
+    if (tabWindow === win || win.isFocused()) moveTabTo(win);
     pump(win);
   }
 
