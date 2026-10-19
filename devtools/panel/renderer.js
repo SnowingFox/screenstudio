@@ -228,24 +228,78 @@
     }),
 
     section('Account', {
-      build: (body, badge) => (data) => {
-        const { signedIn, payload, error } = data.account;
-        badge.replaceChildren(
-          signedIn ? h('span', { class: 'dot' }, '●') : '',
-          signedIn ? 'Signed in' : signedIn === false ? 'Signed out' : '—',
-        );
-        if (!payload) {
-          body.replaceChildren(note(error ?? 'Not signed in. Account details show up here after logging in to Screen Studio.'));
-          return;
-        }
-        body.replaceChildren(
-          ...flatten(payload).map(([key, value]) =>
-            DATE_KEYS.has(key) && typeof value === 'number'
-              ? row(key, `${new Date(value * 1000).toLocaleString()}`, { field: true, title: String(value) })
-              : row(key, value, { field: true }),
-          ),
-          note('Decoded from the auth token the app keeps locally. Read-only.'),
-        );
+      build: (body, badge) => {
+        let name = 'Local Dev';
+        let email = 'dev@localhost.local';
+        const planOf = (payload, local) => {
+          const activation = payload?.appActivation;
+          const kind = activation?.type === 'license-key' || activation?.type === 'legacy-license-key'
+            ? 'License'
+            : activation?.type === 'subscription'
+              ? `Subscription${activation.provider ? ` · ${activation.provider}` : ''}`
+              : activation?.type === 'team'
+                ? 'Team'
+                : payload?.provider === 'sso'
+                  ? 'SSO'
+                  : 'Local';
+          return local ? `${kind} · local mode` : kind;
+        };
+        const field = (label, value, onInput) =>
+          h(
+            'div',
+            { class: 'row' },
+            h('span', { class: 'label' }, label),
+            onInput
+              ? h('input', {
+                  class: 'field-input',
+                  value,
+                  spellcheck: false,
+                  oninput: (event) => onInput(event.target.value),
+                })
+              : h('span', { class: 'value field' }, show(value ?? '—')),
+          );
+        return (data) => {
+          const { signedIn, payload, local, error } = data.account;
+          badge.replaceChildren(
+            signedIn ? h('span', { class: 'dot' }, '●') : '',
+            signedIn ? 'Signed in' : signedIn === false ? 'Signed out' : '—',
+          );
+          if (payload?.fullName) name = payload.fullName;
+          if (payload?.email) email = payload.email;
+          if (signedIn && !payload) {
+            body.replaceChildren(
+              note(error ?? 'A token is stored but it could not be decoded.', 'error'),
+              h('button', { class: 'btn', onclick: (event) => act(event.currentTarget, 'signOut', undefined, 'Signed out') }, 'Sign out'),
+            );
+            return;
+          }
+          if (signedIn && payload) {
+            body.replaceChildren(
+              field('Name', payload.fullName || name),
+              field('Email', payload.email),
+              field('Plan', planOf(payload, local)),
+              h('button', { class: 'btn', onclick: (event) => act(event.currentTarget, 'signOut', undefined, 'Signed out') }, 'Sign out'),
+              local
+                ? note('Local sign-in: stays on this machine, nothing is sent to Screen Studio.')
+                : note('Decoded from the auth token the app keeps locally.'),
+            );
+            return;
+          }
+          body.replaceChildren(
+            field('Name', name, (value) => (name = value)),
+            field('Email', email, (value) => (email = value)),
+            field('Plan', 'Local mode'),
+            h(
+              'button',
+              {
+                class: 'btn',
+                onclick: (event) => act(event.currentTarget, 'signInLocal', { name, email }, 'Signed in'),
+              },
+              'Sign in locally',
+            ),
+            note(error ?? 'Local sign-in: stays on this machine, nothing is sent to Screen Studio.'),
+          );
+        };
       },
     }),
 
@@ -649,7 +703,13 @@
       .row { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 10px; padding: 5px 10px; align-items: baseline; }
       .label { color: #98989d; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .value { font-size: 12px; color: #f2f2f7; overflow-wrap: anywhere; user-select: text; }
-      .value.field { background: rgba(255, 255, 255, .06); border-radius: 6px; padding: 4px 8px; }
+      .value.field, .field-input {
+        background: rgba(255, 255, 255, .06); border-radius: 6px; padding: 4px 8px;
+      }
+      .field-input {
+        width: 100%; border: 1px solid transparent; font-size: 12px; color: #f2f2f7;
+      }
+      .field-input:focus { border-color: rgba(255, 214, 10, .55); background: rgba(255, 255, 255, .09); }
       .muted { color: #8e8e93; }
       .note { color: #8e8e93; font-size: 11.5px; line-height: 1.4; padding: 4px 10px 6px; }
       .error { color: #ff6961 !important; }

@@ -25,7 +25,69 @@
     nextRequestId: 1,
     windowOptions: new Map(), // BrowserWindow id -> options it was opened with
     injected: new WeakSet(),
+    remoteWrapped: false,
   };
+
+  // Local sign-in: a JWT the app will decode (it does not verify the signature
+  // on the client) plus a wrap of the licensing API so Screen Studio never
+  // sends that token to screen.studio.
+  const LOCAL_USER_ID = '00000000-0000-4000-8000-000000000001';
+
+  function jwtPart(value) {
+    return Buffer.from(typeof value === 'string' ? value : JSON.stringify(value)).toString('base64url');
+  }
+
+  function decodeJwtPayload(token) {
+    try {
+      return JSON.parse(Buffer.from(String(token).split('.')[1], 'base64url').toString());
+    } catch {
+      return null;
+    }
+  }
+
+  function isLocalToken(token) {
+    const payload = decodeJwtPayload(token);
+    return Boolean(
+      payload && (payload.userId === LOCAL_USER_ID || /localhost|\.local$/i.test(String(payload.email ?? ''))),
+    );
+  }
+
+  function localToken({ name, email }) {
+    const now = Math.floor(Date.now() / 1000);
+    return [
+      jwtPart({ alg: 'HS256', typ: 'JWT' }),
+      jwtPart({
+        type: 'auth',
+        version: '2.0',
+        userId: LOCAL_USER_ID,
+        email: email || 'dev@localhost.local',
+        fullName: name || 'Local Dev',
+        provider: 'email',
+        iat: now,
+        exp: now + 60 * 60 * 24 * 365 * 10,
+        appActivation: { type: 'license-key', licenseKeyId: 'local', instanceId: 'local-dev' },
+      }),
+      jwtPart('local'),
+    ].join('.');
+  }
+
+  function wrapRemote(client) {
+    if (state.remoteWrapped || !client) return;
+    const query = client.query.bind(client);
+    const mutation = client.mutation.bind(client);
+    client.query = (path, ...args) => {
+      if (path === 'auth.isTokenValid' && isLocalToken(args[0]?.token)) return Promise.resolve(true);
+      if (path === 'activation.status' && isLocalToken(state.auth?.token)) return Promise.resolve({ type: 'valid' });
+      return query(path, ...args);
+    };
+    client.mutation = (path, ...args) => {
+      if (path === 'auth.authorize.app.tryToUpgradeToken' && isLocalToken(args[0]?.token)) {
+        return Promise.resolve({ token: args[0].token });
+      }
+      return mutation(path, ...args);
+    };
+    state.remoteWrapped = true;
+  }
 
   // ---------------------------------------------------------------------------
   // Serialization: everything sent to the page goes through JSON, and previews
@@ -216,12 +278,24 @@
         ...Object.keys(mutations).map((path) => ({ path, type: 'mutation' })),
         ...Object.keys(subscriptions).map((path) => ({ path, type: 'subscription' })),
       ].sort((a, b) => a.path.localeCompare(b.path));
+      const resolver = mutations['auth.setToken']?.resolver;
+      if (resolver) {
+        state.auth = findInClosures(resolver, (value) => typeof value.setToken === 'function' && typeof value.logout === 'function');
+        wrapRemote(
+          findInClosures(
+            resolver,
+            (value) => typeof value.query === 'function' && typeof value.mutation === 'function' && value.client && value.queryCache,
+          ),
+        );
+      }
     }
     state.invoke = wrapHandlers(bridge);
     return true;
   }
 
   // The tRPC handler is registered while the app boots, after we are injected.
+  // Wrap the licensing client as soon as it exists so a persisted local token
+  // is not cleared by auth.isTokenValid / activation.status against screen.studio.
   const connectTimer = setInterval(() => {
     try {
       if (connectToApp()) clearInterval(connectTimer);
@@ -229,7 +303,7 @@
       clearInterval(connectTimer);
       console.error('[devtools] Could not reach the Screen Studio IPC bridge:', error);
     }
-  }, 300);
+  }, 50);
   setTimeout(() => clearInterval(connectTimer), 120_000);
 
   async function trpc(win, path, type = 'query', input = undefined) {
@@ -339,6 +413,7 @@
       account: {
         signedIn: signedIn.value ?? null,
         payload: toPlain(payload.value ?? null),
+        local: isLocalToken(state.auth?.token),
         error: signedIn.error ?? payload.error ?? null,
       },
       permissions: permissions(),
@@ -362,6 +437,11 @@
     snapshot: (win) => snapshot(win),
     procedures: () => state.procedures ?? [],
     setPreference: (win, { key, value }) => trpc(win, 'preferences.update', 'mutation', { changes: { [key]: value } }),
+    signInLocal: async (win, { name, email } = {}) => {
+      const token = localToken({ name, email });
+      await trpc(win, 'auth.setToken', 'mutation', { token });
+    },
+    signOut: (win) => trpc(win, 'auth.logout', 'mutation'),
     call: async (win, { path, type, input }) => {
       if (type !== 'query' && type !== 'mutation') throw new Error('Only queries and mutations can be called from here');
       return preview(await trpc(win, path, type, input), 20_000);
