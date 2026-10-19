@@ -98,10 +98,12 @@
 
   let open = false;
   let tabAllowed = false;
+  // False while Screen Studio is in the background (main.js, setActive).
+  let appActive = true;
   function layout() {
     const showTab =
       tabAllowed && window.innerWidth >= MIN_TAB_WINDOW.width && window.innerHeight >= MIN_TAB_WINDOW.height;
-    frame.style.display = open || showTab ? 'block' : 'none';
+    frame.style.display = appActive && (open || showTab) ? 'block' : 'none';
     if (open) {
       Object.assign(frame.style, {
         top: '0',
@@ -603,7 +605,7 @@
   let refreshTimer = null;
   async function refresh() {
     clearTimeout(refreshTimer);
-    if (!open) return;
+    if (!open || !appActive) return;
     if (refreshing) {
       refreshAgain = true;
       return;
@@ -648,6 +650,11 @@
     setTabAllowed(value) {
       tabAllowed = value;
       layout();
+    },
+    setActive(value) {
+      appActive = value;
+      layout();
+      if (value) refresh();
     },
   };
 
