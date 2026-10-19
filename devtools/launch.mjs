@@ -78,9 +78,17 @@ function readSource(path) {
   return readFileSync(new URL(path, import.meta.url), 'utf8');
 }
 
-// The inspector comes up before Electron has registered its `electron` module.
+// The inspector comes up before Electron has registered its `electron` module,
+// and the module resolves a little before its main-process APIs are usable.
 async function waitForElectron(webSocketUrl) {
-  const probe = "(() => { try { (process.mainModule?.require ?? require)('electron'); return true } catch { return false } })()";
+  const probe = `(() => {
+    try {
+      const { BrowserWindow, Menu } = (process.mainModule?.require ?? require)('electron');
+      return typeof BrowserWindow?.getAllWindows === 'function' && typeof Menu?.getApplicationMenu === 'function';
+    } catch {
+      return false;
+    }
+  })()`;
   for (let attempt = 0; attempt < 200; attempt++) {
     if (await evaluate(webSocketUrl, probe).catch(() => false)) return;
     await sleep(25);
