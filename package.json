@@ -1,0 +1,11 @@
+{
+  "name": "screenstudio-devtools",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "devtools": "node devtools/launch.mjs"
+  },
+  "devDependencies": {
+    "electron": "^44.9.0"
+  }
+}
