@@ -517,6 +517,20 @@
     if (state.injected.has(win.webContents)) moveTabTo(win);
   });
 
+  // Some windows (the main one included) stay shown, always on top and on all
+  // Spaces while the app is in the background, with their content unmounted.
+  // Hide the tab and panel then, or they float alone over other apps.
+  let appActive = true;
+  function setAppActive(value) {
+    appActive = value;
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed() || !state.injected.has(win.webContents)) continue;
+      win.webContents.executeJavaScript(`window.__ssDevtoolsPanel?.setActive(${value})`).catch(() => {});
+    }
+  }
+  app.on('did-become-active', () => setAppActive(true));
+  app.on('did-resign-active', () => setAppActive(false));
+
   async function inject(win) {
     if (win.isDestroyed() || state.injected.has(win.webContents)) return;
     state.injected.add(win.webContents);
@@ -527,6 +541,7 @@
       console.error(`[devtools] Could not inject the DEV panel into window #${win.id}:`, error);
       return;
     }
+    if (!appActive) win.webContents.executeJavaScript('window.__ssDevtoolsPanel?.setActive(false)').catch(() => {});
     if (tabWindow === win || win.isFocused()) moveTabTo(win);
     pump(win);
   }

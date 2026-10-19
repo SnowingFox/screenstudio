@@ -5,8 +5,9 @@
 //   pm2 logs screenstudio-devtools     # follow output
 //   pm2 stop screenstudio-devtools     # stop (also quits Screen Studio)
 //
-// launch.mjs exits when Screen Studio quits; autorestart brings both back, so
-// quitting the app window relaunches it. Use `pm2 stop` to actually stop.
+// launch.mjs exits with 0 when Screen Studio quits normally, and pm2 leaves it
+// stopped (stop_exit_codes). Other exits (failed launch, crash of the launcher)
+// are restarted. Start it again with `pm2 restart screenstudio-devtools`.
 const path = require('node:path');
 
 module.exports = {
@@ -18,6 +19,8 @@ module.exports = {
       cwd: __dirname,
       // args: '--main-devtools',   // uncomment to also open the main-process DevTools window
       autorestart: true,
+      // Quitting Screen Studio (Cmd+Q) is not a crash: don't bring it back.
+      stop_exit_codes: [0],
       restart_delay: 3000,
       // Guard against a hot loop when the app is missing or already running:
       // a run has to stay up 10s to count as healthy, and we give up after 10

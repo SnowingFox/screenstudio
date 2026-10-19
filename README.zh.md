@@ -38,7 +38,7 @@ bun run daemon:stop     # 停掉（会连 Screen Studio 一起退）
 pm2 save                # 让 pm2 重启后记住它
 ```
 
-`launch.mjs` 在 Screen Studio 退出时也会退出，pm2 会把它拉起来，所以**关掉 app 窗口它会（隔几秒）自己重开**。真要停就用 `bun run daemon:stop`。daemon 启动时 Screen Studio 不能已经在跑。想开机自启就跑 `pm2 startup`，按它打印的命令执行。
+正常退出 Screen Studio（Cmd+Q）时 `launch.mjs` 以 0 退出，pm2 不会再拉起；只有异常退出才会重启。想重新打开就跑 `bun run daemon:restart`。daemon 启动时 Screen Studio 不能已经在跑。想开机自启就跑 `pm2 startup`，按它打印的命令执行。
 
 ## 面板里有什么
 

@@ -38,7 +38,7 @@ bun run daemon:stop     # stop it (also quits Screen Studio)
 pm2 save                # remember it across pm2 restarts
 ```
 
-`launch.mjs` exits when Screen Studio quits and pm2 restarts it, so **closing the app window relaunches it** (after a short delay). Use `bun run daemon:stop` to actually stop. Screen Studio must not already be running when the daemon starts. For launch-at-login, run `pm2 startup` and follow the printed command.
+Quitting Screen Studio (Cmd+Q) makes `launch.mjs` exit with 0, and pm2 leaves it stopped; only abnormal exits are restarted. Run `bun run daemon:restart` to bring it back. Screen Studio must not already be running when the daemon starts. For launch-at-login, run `pm2 startup` and follow the printed command.
 
 ## What’s in the panel
 
