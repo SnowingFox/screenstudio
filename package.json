@@ -3,7 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "devtools": "node devtools/launch.mjs"
+    "devtools": "node devtools/launch.mjs",
+    "daemon": "pm2 start ecosystem.config.cjs",
+    "daemon:stop": "pm2 stop screenstudio-devtools",
+    "daemon:restart": "pm2 restart screenstudio-devtools",
+    "daemon:logs": "pm2 logs screenstudio-devtools"
   },
   "devDependencies": {
     "electron": "^44.9.0"

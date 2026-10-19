@@ -26,6 +26,20 @@ App 不在默认路径时：
 node devtools/launch.mjs --app "/path/to/Screen Studio.app"
 ```
 
+### 后台常驻（pm2）
+
+想让它常驻、Screen Studio 一直开着并带着面板：
+
+```bash
+npm install -g pm2
+bun run daemon          # pm2 start ecosystem.config.cjs
+bun run daemon:logs     # 看日志
+bun run daemon:stop     # 停掉（会连 Screen Studio 一起退）
+pm2 save                # 让 pm2 重启后记住它
+```
+
+`launch.mjs` 在 Screen Studio 退出时也会退出，pm2 会把它拉起来，所以**关掉 app 窗口它会（隔几秒）自己重开**。真要停就用 `bun run daemon:stop`。daemon 启动时 Screen Studio 不能已经在跑。想开机自启就跑 `pm2 startup`，按它打印的命令执行。
+
 ## 面板里有什么
 
 | 分组 | 内容 |

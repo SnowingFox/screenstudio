@@ -26,6 +26,20 @@ If the app is not in the default location:
 node devtools/launch.mjs --app "/path/to/Screen Studio.app"
 ```
 
+### Run in the background (pm2)
+
+To keep it resident so Screen Studio is always up with the panel injected:
+
+```bash
+npm install -g pm2
+bun run daemon          # pm2 start ecosystem.config.cjs
+bun run daemon:logs     # follow output
+bun run daemon:stop     # stop it (also quits Screen Studio)
+pm2 save                # remember it across pm2 restarts
+```
+
+`launch.mjs` exits when Screen Studio quits and pm2 restarts it, so **closing the app window relaunches it** (after a short delay). Use `bun run daemon:stop` to actually stop. Screen Studio must not already be running when the daemon starts. For launch-at-login, run `pm2 startup` and follow the printed command.
+
 ## What’s in the panel
 
 | Section | |
